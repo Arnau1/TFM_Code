@@ -36,10 +36,10 @@ def read_data(data_path, score_path, score_type, dist_threshold=10, family=False
     superposition_df = pd.DataFrame()
 
     # Traverse the directory
-    for file in sorted(os.listdir(pdb_path)):
+    for file in sorted(os.listdir(data_path)):
         # Load graphs
         if file.endswith(".pkl"):
-            filepath = os.path.join(pdb_path, file)
+            filepath = os.path.join(data_path, file)
             graph_files.append(filepath)
             # Keep name, index and family for labeling
             if family:
@@ -160,6 +160,29 @@ class GraphDataset(Dataset):
         graph = build_graph(raw_graph, name, metadata, dist_threshold=self.dist_threshold, verbose=0)
 
         return graph
+
+def split_graphs(graphs, train_size=0.7, val_size=0.15, test_size=0.15):
+    assert train_size + val_size + test_size == 1, "Data splits should be equal to 1"
+    # Extract family labels and indices
+    families = [graph.family for graph in graphs]
+    indices = list(range(len(graphs)))
+    print(families)
+
+    # First split: train/temp
+    train_idx, temp_idx = train_test_split(indices, train_size=train_size, stratify=families, random_state=42)
+    temp_families = [families[i] for i in temp_idx]
+    # Second split: validation/test
+    val_idx, test_idx = train_test_split(temp_idx, test_size=test_size, stratify=temp_families, random_state=42)
+
+    assert len(train_idx) >= 2 and len(val_idx) >= 2 and len(test_idx) >= 2, "All data splits must contain at least two elements"
+
+    # Create PyTorch datasets
+    train_data = Subset(graph_database, train_idx)
+    validation_data = Subset(graph_database, val_idx)
+    test_data = Subset(graph_database, test_idx)
+
+    print(len(train_data), len(validation_data), len(test_data))
+    return train_data, validation_data, test_data
 
 '''
     MODEL
@@ -415,7 +438,6 @@ def test(model, loader, device, criterion, writer=None, load=False, model_path="
 '''
     MAIN    
 '''
-'''
 print('-'*50)
 print("Starting main execution...")
 main_start = time.time()
@@ -424,12 +446,9 @@ device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f"Using device: {device}")
 
 # Define paths
-#pdb_path = "/localdata1/arnau/graph_database/annotation/"
-#score_path = "/localdata1/arnau/graph_database/annotation/"
-#output_path = "/localdata1/arnau/graph_database/log/"
-pdb_path = "/cri4/arnau/repo/test/annotation/"
-score_path = "/cri4/arnau/repo/test/score/"
-output_path = "/cri4/arnau/repo/test/logs/"
+pdb_path = "/localdata1/arnau/graph_database/annotation/"
+score_path = "/localdata1/arnau/graph_database/annotation/"
+output_path = "/localdata1/arnau/graph_database/log/"
 
 # Load graph dataset and dataframe of scores
 start = time.time()
@@ -437,8 +456,6 @@ graph_database, matrix_score = read_data(pdb_path, score_path, score_type="Max_T
 print(f"Data loaded in {(time.time() - start):.2f} seconds")
 
 # Split data
-'''
-'''
 start = time.time()
 train_size = int(0.4 * len(graph_database))
 val_size = int(0.3 * len(graph_database))
@@ -447,40 +464,13 @@ assert train_size >= 2 and val_size >= 2 and test_size >= 2, "All data splits mu
 generator = torch.Generator().manual_seed(42)
 train_data, validation_data, test_data = random_split(graph_database, lengths=[train_size, val_size, test_size], generator=generator)
 print(f"Data split in {(time.time() - start):.2f} seconds")
-'''
-'''
-def split_graphs(graphs, train_size=0.7, val_size=0.15, test_size=0.15):
-    assert train_size + val_size + test_size == 1, "Data splits should be equal to 1"
-    # Extract family labels and indices
-    families = [graph.family for graph in graphs]
-    indices = list(range(len(graphs)))
-    print(families)
 
-    # First split: train/temp
-    train_idx, temp_idx = train_test_split(indices, train_size=train_size, stratify=families, random_state=42)
-    temp_families = [families[i] for i in temp_idx]
-    # Second split: validation/test
-    val_idx, test_idx = train_test_split(temp_idx, test_size=test_size, stratify=temp_families, random_state=42)
-
-    assert len(train_idx) >= 2 and len(val_idx) >= 2 and len(test_idx) >= 2, "All data splits must contain at least two elements"
-
-    # Create PyTorch datasets
-    train_data = Subset(graph_database, train_idx)
-    validation_data = Subset(graph_database, val_idx)
-    test_data = Subset(graph_database, test_idx)
-
-    print(len(train_data), len(validation_data), len(test_data))
-    return train_data, validation_data, test_data
-
-train_data, validation_data, test_data = split_graphs(graph_database, train_size=0.7, val_size=0.15, test_size=0.15)
-print(train_data, validation_data, test_data)
 # Create dataloaders
 start = time.time()
 train_loader = DataLoader(train_data, batch_size=16, shuffle=True)
 validation_loader = DataLoader(validation_data, batch_size=16, shuffle=False)
 test_loader = DataLoader(test_data, batch_size=16, shuffle=False)
 print(f"Dataloaders created in {(time.time() - start):.2f} seconds")
-
 
 # TensorBoard writer
 start = time.time()
@@ -506,4 +496,4 @@ if save:
         pickle.dump(output_data, file)
 
 print(f"Total execution time: {(time.time() - main_start):.2f} seconds")
-'''
+
